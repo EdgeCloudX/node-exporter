@@ -16,14 +16,21 @@ all::
 
 # Needs to be defined before including Makefile.common to auto-generate targets
 DOCKER_ARCHS ?= amd64 armv7 arm64 ppc64le s390x
+REGISTRY ?= cloudx2021
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x
+BASEIMAGE ?= quay.io/prometheus/busybox:latest
+DOCKER_IMAGE_NAME ?= node-exporter
+CGO_ENABLED:=0
+ifeq ($(ENABLE_JOURNALD), 1)
+	CGO_ENABLED:=1
+	LOGCOUNTER=./bin/log-counter
+endif
 
 include Makefile.common
 
 PROMTOOL_VERSION ?= 2.30.0
 PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
-
-DOCKER_IMAGE_NAME       ?= node-exporter
 MACH                    ?= $(shell uname -m)
 
 STATICCHECK_IGNORE =
@@ -138,6 +145,18 @@ checkrules: $(PROMTOOL)
 test-docker:
 	@echo ">> testing docker image"
 	./test_image.sh "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-amd64:$(DOCKER_IMAGE_TAG)" 9100
+
+.PHONY: build
+build:
+	go mod vendor
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GO111MODULE=on go build -mod vendor -o build/node-exporter node_exporter.go
+
+.PHONY: buildx-push
+buildx-push:
+	# So we can push to docker hub by setting REGISTRY
+	# Build should be cached from build-container
+	docker buildx create --use
+	docker buildx build --push --platform $(DOCKER_PLATFORMS) -t $(REGISTRY)/$(DOCKER_IMAGE_NAME) --build-arg BASEIMAGE=$(BASEIMAGE) .
 
 .PHONY: promtool
 promtool: $(PROMTOOL)
